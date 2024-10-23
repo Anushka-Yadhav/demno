@@ -4,7 +4,8 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 import os
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 import google.generativeai as genai
-from langchain_community.vectorstores import FAISS
+import faiss
+import numpy as np
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.chains.question_answering import load_qa_chain
 from langchain.prompts import PromptTemplate
@@ -35,13 +36,18 @@ def get_text_chunks(text):
 # Function to create vector store from text chunks using FAISS and embeddings
 def get_vector_store(text_chunks):
     embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
-    vector_store = FAISS.from_texts(text_chunks, embedding=embeddings)
-    vector_store.save_local("faiss_index")
+    vectors = [embeddings.embed_text(chunk) for chunk in text_chunks]
+    dimension = len(vectors[0])
+    
+    # Create a FAISS index
+    index = faiss.IndexFlatL2(dimension)
+    index.add(np.array(vectors).astype('float32'))  # Add vectors to the index
+    faiss.write_index(index, "faiss_index.index")  # Save index to file
 
 # Function to set up a conversational chain with a custom prompt
 def get_conversational_chain():
     prompt_template = """
-    Answer the question in as detailed as possible from the provided context, make sure to provide all the details. If the answer is not in the provided context, just say, "Sorry but I cant fetch the Information from the database" and don't provide a wrong answer.\n\n
+    Answer the question in as detailed as possible from the provided context, make sure to provide all the details. If the answer is not in the provided context, just say, "Sorry but I can't fetch the information from the database" and don't provide a wrong answer.\n\n
     Context:\n {context}\n
     Question: \n{question}\n
 
@@ -59,6 +65,10 @@ query_cooldown = 5  # seconds
 @st.cache_data
 def cached_user_input(user_question):
     embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+    
+    # Load the FAISS index
+    index = faiss.read_index("faiss_index.index")
+    # Retrieve the vectors from the index
     new_db = FAISS.load_local("faiss_index", embeddings, allow_dangerous_deserialization=True)
     docs = new_db.similarity_search(user_question)
 
@@ -142,4 +152,4 @@ def main():
             st.markdown(response)
 
 if __name__ == "__main__":
-    main()  
+    main()
